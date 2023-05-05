@@ -73,7 +73,7 @@ ISO image or a simple .tar.gz file
 5. special edition (with FreeBSD distribution):
 
   ```bash
-  make iso BASE=/cdrom/11.0-RELEASE RELEASE=11.0-RELEASE ARCH=amd64
+  make iso BASE=/cdrom/11.0-RELEASE RELEASE=11.0-RELEASE ARCH=amd64 SE=1
   ```
 
 6. GCE-compatible .tar.gz file:

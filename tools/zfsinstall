@@ -9,7 +9,7 @@ FS_LIST="var tmp"
 RAID_TYPES="mirror raidz raidz1 raidz2 raidz3"
 
 usage() {
-	echo "Usage: $0 [-h] -d geom_provider [-d geom_provider ...] [ -u dist_url ] [-r mirror|raidz[1|2|3]] [-m mount_point] [-p zfs_pool_name] [-s swap_partition_size] [-z zfs_partition_size] [-c] [-C] [-l] [-4] [-A]"
+	echo "Usage: $0 [-h] -d geom_provider [-d geom_provider ...] [ -u dist_url ] [-r mirror|raidz[1|2|3]] [-m mount_point] [-p zfs_pool_name] [-s swap_partition_size] [-z zfs_partition_size] [-c] [-C] [-b] [-l] [-4] [-A]"
 }
 
 osarch() {
@@ -47,6 +47,7 @@ help() {
 	echo "-p pool_name             : specify a name for the ZFS pool (default: tank)"
 	echo "-C                       : compatibility mode with limited feature flags"
 	echo "                           (enable only async_destroy, empty_bpobj and lz4_compress)"
+	echo "-b                       : bectl compatible ZFS layout (2 level)"
 	echo "-m mount_point           : use this mount point for operations (default: /mnt)"
 	echo "-c                       : enable compression for all datasets"
 	echo "-l                       : use legacy mounts (via fstab) instead of ZFS mounts"
@@ -69,7 +70,7 @@ help() {
 	echo "You can enable all swap partitions and/or make a gmirror-ed swap later."
 }
 
-while getopts d:u:t:r:p:s:z:m:V:Chcl4A o; do
+while getopts d:u:t:r:p:s:z:m:V:Cbhcl4A o; do
 	case "$o" in
         	d) DEVS="$DEVS ${OPTARG##/dev/}"; ZDEVS="$ZDEVS ${OPTARG##/dev/}" ;;
 		u) URL="${OPTARG}" ;;
@@ -119,6 +120,7 @@ while getopts d:u:t:r:p:s:z:m:V:Chcl4A o; do
 		z) ZPART="${OPTARG}" ;;
 		V) VERSION="${OPTARG}" ;;
 		C) COMPAT=1 ;;
+		b) BECTL_COMPATIBLE_ZFS=1 ;;
 		c) COMPRESS=1 ;;
 		l) LEGACY=1 ;;
 		4) FLETCHER=1 ;;
@@ -371,10 +373,27 @@ if [ "${COMPRESS}" = "1" ]; then
 	echo " done"
 fi
 
+
 echo -n "Creating ${POOL} root partition:"
-if ! /sbin/zfs create -o mountpoint=${ROOTMNT} ${POOL}/root > /dev/null 2> /dev/null; then
-	echo " error"
-	exit 1
+if [ "${BECTL_COMPATIBLE_ZFS}" = "1" ]; then
+	if ! /sbin/zfs create -o canmount=off ${POOL}/os  > /dev/null 2> /dev/null; then
+		echo " error"
+		exit 1
+	fi
+	if ! /sbin/zfs create -o canmount=off ${POOL}/os/root  > /dev/null 2> /dev/null; then
+		echo " error"
+		exit 1
+	fi
+	# we cannot do -o canmount=noauto for os/root/default.  loader will fail
+	if ! /sbin/zfs create -o mountpoint=${ROOTMNT} ${POOL}/os/root/default > /dev/null 2> /dev/null; then
+		echo " error"
+		exit 1
+	fi
+else
+	if ! /sbin/zfs create -o mountpoint=${ROOTMNT} ${POOL}/root > /dev/null 2> /dev/null; then
+		echo " error"
+		exit 1
+	fi
 fi
 echo " ... done"
 echo -n "Creating ${POOL} partitions:"
@@ -384,17 +403,32 @@ for FS in ${FS_LIST}; do
 	else
 		MNTPT=
 	fi
-	if ! /sbin/zfs create ${MNTPT} ${POOL}/root/${FS} > /dev/null 2> /dev/null; then
-		echo " error"
-		exit 1
+	if [ "${BECTL_COMPATIBLE_ZFS}" = "1" ]; then
+		if ! /sbin/zfs create ${MNTPT} ${POOL}/os/${FS} > /dev/null 2> /dev/null; then
+			echo " error"
+			exit 1
+		fi
+	else
+		if ! /sbin/zfs create ${MNTPT} ${POOL}/root/${FS} > /dev/null 2> /dev/null; then
+			echo " error"
+			exit 1
+		fi
 	fi
 	echo -n " ${FS}"
 done
 echo " ... done"
-echo -n "Setting bootfs for ${POOL} to ${POOL}/root ..."
-if ! /sbin/zpool set bootfs=${POOL}/root ${POOL} > /dev/null 2> /dev/null; then
-	echo " error"
-	exit 1
+if [ "${BECTL_COMPATIBLE_ZFS}" = "1" ]; then
+	echo -n "Setting bootfs for ${POOL} to ${POOL}/os/root/default ..."
+	if ! /sbin/zpool set bootfs=${POOL}/os/root/default ${POOL} > /dev/null 2> /dev/null; then
+		echo " error"
+		exit 1
+	fi
+else
+	echo -n "Setting bootfs for ${POOL} to ${POOL}/root ..."
+	if ! /sbin/zpool set bootfs=${POOL}/root ${POOL} > /dev/null 2> /dev/null; then
+		echo " error"
+		exit 1
+	fi
 fi
 echo " done"
 /sbin/zfs list -r ${POOL}
@@ -430,7 +464,14 @@ echo " done"
 
 echo -n "Writing /boot/loader.conf..."
 echo "zfs_load=\"YES\"" > ${MNT}/boot/loader.conf
-echo "vfs.root.mountfrom=\"zfs:${POOL}/root\"" >> ${MNT}/boot/loader.conf
+if [ "${BECTL_COMPATIBLE_ZFS}" = "1" ]; then
+	: 
+	# we don't set vfs.root.mountfrom as per https://wiki.freebsd.org/BootEnvironments
+	# doing this, prevents reboot. do it after rebooting for now
+	# zfs set canmount=noauto ${POOL}/os/root/default
+else
+	echo "vfs.root.mountfrom=\"zfs:${POOL}/root\"" >> ${MNT}/boot/loader.conf
+fi
 echo " done"
 
 # Write fstab if swap or legacy

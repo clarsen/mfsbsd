@@ -523,8 +523,10 @@ ${WRKDIR}/.boot_done:
 	${_v}${CP} -rp ${_DESTDIR}/boot/${FILE} ${WRKDIR}/disk/boot
 .endfor
 .if defined(LOADER_4TH)
+	@echo -n "  Using loader_4th ..."
 	${_v}${MV} -f ${WRKDIR}/disk/boot/loader_4th ${WRKDIR}/disk/boot/loader
 .else
+	@echo -n "  Using loader_lua ..."
 	${_v}${MV} -f ${WRKDIR}/disk/boot/loader_lua ${WRKDIR}/disk/boot/loader
 .endif
 	${_v}${RM} -rf ${WRKDIR}/disk/boot/kernel/*.ko ${WRKDIR}/disk/boot/kernel/*.symbols
@@ -604,12 +606,14 @@ image: install prune cdboot config genkeys customfiles customscripts boot efiboo
 ${IMAGE}:
 	@echo -n "Creating image file ..."
 .if defined(BSDPART)
+	@echo -n "  BSD partitioning ..."
 	${_v}${MKDIR} ${WRKDIR}/mnt ${WRKDIR}/trees/base/boot
 	${_v}${INSTALL} -m 0444 ${WRKDIR}/disk/boot/boot ${WRKDIR}/trees/base/boot/
 	${_v}${DOFS} ${BSDLABEL} "" ${WRKDIR}/disk.img ${WRKDIR} ${WRKDIR}/mnt 0 ${WRKDIR}/disk 80000 auto > /dev/null 2> /dev/null
 	${_v}${RM} -rf ${WRKDIR}/mnt ${WRKDIR}/trees
 	${_v}${MV} ${WRKDIR}/disk.img ${.TARGET}
 .else
+	@echo -n "  GPT partitioning ..."
 	${_v}${TOOLSDIR}/do_gpt.sh ${.TARGET} ${WRKDIR}/disk 0 ${WRKDIR}/boot ${WRKDIR}/cdboot/efiboot.img ${VERB}
 .endif
 	@echo " done"
@@ -630,11 +634,13 @@ iso: install prune cdboot config genkeys customfiles customscripts boot efiboot 
 ${ISOIMAGE}:
 	@echo -n "Creating ISO image ..."
 .if !defined(NO_EFIBOOT)
+	@echo -n "  EFI boot ..."
 	${_v}${MAKEFS} -t cd9660 -o rockridge,label=mfsBSD \
 	-o bootimage=i386\;${WRKDIR}/cdboot/cdboot,no-emul-boot \
 	-o bootimage=i386\;${WRKDIR}/cdboot/efiboot.img,no-emul-boot,platformid=efi \
 	${ISOIMAGE} ${WRKDIR}/disk
 .else
+	@echo -n "  BIOS boot ..."
 	${_v}${MAKEFS} -t cd9660 -o rockridge,label=mfsBSD \
 	-o bootimage=i386\;${WRKDIR}/cdboot/cdboot,no-emul-boot \
 	${ISOIMAGE} ${WRKDIR}/disk
